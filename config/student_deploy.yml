@@ -1,0 +1,176 @@
+class_names: &class_names ['vehicle']
+save_dir: workspace/student_distilled
+model:
+  weight_averager:
+    name: ExpMovingAverager
+    decay: 0.9998
+  arch:
+    name: NanoDetPlus
+    detach_epoch: 10
+
+    backbone:
+      name: RepVGG
+      arch: A0
+      out_stages: [2, 3, 4]
+      activation: ReLU
+      deploy: True
+
+    fpn:
+      name: GhostPAN
+      in_channels: [96, 192, 1280]
+      out_channels: 96
+      kernel_size: 5
+      num_extra_level: 1
+      use_depthwise: True
+      activation: ReLU
+
+    head:
+      name: NanoDetPlusHead
+      num_classes: 1
+      input_channel: 96
+      feat_channels: 96
+      stacked_convs: 2
+      kernel_size: 5
+      strides: [8, 16, 32, 64]
+      activation: ReLU
+      reg_max: 7
+      norm_cfg:
+        type: BN
+      loss:
+        loss_qfl:
+          name: QualityFocalLoss
+          use_sigmoid: True
+          beta: 2.0
+          loss_weight: 1.0
+        loss_dfl:
+          name: DistributionFocalLoss
+          loss_weight: 0.25
+        loss_bbox:
+          name: GIoULoss
+          loss_weight: 2.0
+
+    aux_head:
+      name: SimpleConvHead
+      num_classes: 1
+      input_channel: 192
+      feat_channels: 192
+      stacked_convs: 4
+      strides: [8, 16, 32, 64]
+      activation: ReLU
+      reg_max: 7
+
+distillation:
+  teacher_model:
+    arch:
+      name: NanoDetPlus
+      backbone:
+        name: ShuffleNetV2
+        model_size: 1.0x
+        out_stages: [2,3,4]
+        activation: LeakyReLU
+      fpn:
+        name: GhostPAN
+        in_channels: [116, 232, 464]
+        out_channels: 96
+        kernel_size: 5
+        num_extra_level: 1
+        use_depthwise: True
+        activation: LeakyReLU
+      head:
+        name: NanoDetPlusHead
+        num_classes: 1
+        input_channel: 96
+        feat_channels: 96
+        stacked_convs: 2
+        kernel_size: 5
+        strides: [8, 16, 32, 64]
+        activation: LeakyReLU
+        reg_max: 7
+        norm_cfg:
+          type: BN
+        loss:
+          loss_qfl:
+            name: QualityFocalLoss
+            use_sigmoid: True
+            beta: 2.0
+            loss_weight: 1.0
+          loss_dfl:
+            name: DistributionFocalLoss
+            loss_weight: 0.25
+          loss_bbox:
+            name: GIoULoss
+            loss_weight: 2.0
+      aux_head:
+        name: SimpleConvHead
+        num_classes: 1
+        input_channel: 192
+        feat_channels: 192
+        stacked_convs: 4
+        strides: [8, 16, 32, 64]
+        activation: LeakyReLU
+        reg_max: 7
+
+  teacher_checkpoint: "C:/kurs/nanodet-main/nanodet-main/workspace/teacher/model_last.ckpt"
+  loss:
+    name: DistillationLoss
+    use_feature: True
+    feature_weight: 1.0
+    output_weight: 1.0
+
+data:
+  train:
+    name: CocoDataset
+    img_path: "C:/kurs/nanodet-main/nanodet-main/coco/train2017"
+    ann_path: "C:/kurs/nanodet-main/nanodet-main/coco/annotations/teacher_train.json"
+    input_size: [320,320]
+    keep_ratio: False
+    pipeline:
+      perspective: 0.0
+      scale: [0.6, 1.4]
+      stretch: [[0.8, 1.2], [0.8, 1.2]]
+      rotation: 0
+      shear: 0
+      translate: 0.2
+      flip: 0.5
+      brightness: 0.2
+      contrast: [0.6, 1.4]
+      saturation: [0.5, 1.2]
+      normalize: [[103.53, 116.28, 123.675], [57.375, 57.12, 58.395]]
+  val:
+    name: CocoDataset
+    img_path: "C:/kurs/nanodet-main/nanodet-main/coco/val2017"
+    ann_path: "C:/kurs/nanodet-main/nanodet-main/coco/annotations/teacher_val.json"
+    input_size: [320,320]
+    keep_ratio: False
+    pipeline:
+      normalize: [[103.53, 116.28, 123.675], [57.375, 57.12, 58.395]]
+
+device:
+  gpu_ids: [0]
+  workers_per_gpu: 0
+  batchsize_per_gpu: 14
+  precision: 16
+
+schedule:
+  resume: True
+  load_model: "workspace/student_distilled/model_last.ckpt"
+  optimizer:
+    name: AdamW
+    lr: 0.001
+    weight_decay: 0.05
+  warmup:
+    name: linear
+    steps: 500
+    ratio: 0.0001
+  total_epochs: 100
+  lr_schedule:
+    name: CosineAnnealingLR
+    T_max: 300
+    eta_min: 0.00005
+  val_intervals: 10
+grad_clip: 35
+evaluator:
+  name: CocoDetectionEvaluator
+  save_key: mAP
+log:
+  interval: 50
